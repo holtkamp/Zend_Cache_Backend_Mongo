@@ -1,0 +1,26 @@
+{
+    "name": "antonstoeckl/zend-cache-backend-mongo",
+    "type": "library",
+    "description": "Zend_Cache_Backend_Mongo is a Zend Framework <http://zendframework.com/> Backend for MongoDB <http://www.mongodb.org/>. It supports tags and autocleaning.Xajax is an open source PHP class library for easily creating powerful PHP-driven, web-based Ajax Applications. Using Xajax, you can asynchronously call PHP functions and update the content of your your webpage without reloading the page.",
+    "authors": [
+        {"name": "Olivier Bregeras", "email": "olivier.bregeras@gmail.com", "homepage": "http://stunti.org"},
+        {"name": "Anton Stöckl", "email": "anton@stoeckl.de", "homepage": "http://stoeckl.de"},
+        {"name": "Menno Holtkamp"}
+    ],
+    "homepage": "http://framework.zend.com/",
+    "keywords": ["Zend Framework", "Cache", "Mongo", "MongoDB"],
+    "license": "BSD-3-Clause",
+    "support": {
+        "source": "https://github.com/AntonStoeckl/Zend_Cache_Backend_Mongo"
+    },
+    "require": {
+        "php": ">=5.3.2",
+        "ext-mongo": ">=1.2.12,<1.6-dev",
+        "zendframework/zendframework1": "1.11.*"
+    },
+    "autoload": {
+        "psr-0": {
+            "Zend_": "library/"
+        }
+    }
+}
