@@ -65,11 +65,39 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
         // Merge the options passed in; overridding any default options
         $this->_options = array_merge($this->_options, $options);
         
-        $this->_conn       = new Mongo($this->_options['host'], $this->_options['port'], $this->_options['persistent']);
+        $this->_conn       = new MongoClient($this->getServerConnectionUrl());
         $this->_db         = $this->_conn->selectDB($this->_options['dbname']);
         $this->_collection = $this->_db->selectCollection($this->_options['collection']);
         $this->_collection->ensureIndex(array('t' => 1), array('background' => true));
         $this->_collection->ensureIndex(array('expire' => 1), array('background' => true));
+    }
+    
+    /**
+     * Assemble the URL that can be used to connect to the MongoDB server
+     * 
+     * Note that connections to multiple servers at once is currently not supported
+     * 
+     * @link http://www.php.net/manual/en/mongoclient.construct.php
+     * @return string
+     */
+    private function getServerConnectionUrl()
+    {
+        if(isset($this->_options['username']) && isset($this->_options['password'])){
+            return sprintf('mongodb://%s:%s@%s:%d/%s'
+                    , $this->_options['username']
+                    , $this->_options['password']
+                    , $this->_options['host']
+                    , $this->_options['port']
+                    , $this->_options['dbname']
+            );
+        }
+        else{
+            return sprintf('mongodb://%s:%d/%s'
+                    , $this->_options['host']
+                    , $this->_options['port']
+                    , $this->_options['dbname']
+            );
+        }
     }
     
     /**
