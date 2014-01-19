@@ -89,7 +89,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     private function getServerConnectionUrl()
     {
         $parts = array('mongodb://');
-        if(isset($this->_options['username']) && strlen($this->_options['username']) > 0 && isset($this->_options['password']) && strlen(($this->_options['password']) > 0)){
+        if(isset($this->_options['username']) && strlen($this->_options['username']) > 0 && isset($this->_options['password']) && strlen($this->_options['password']) > 0){
             $parts[] = $this->_options['username'];
             $parts[] = ':';
             $parts[] = $this->_options['password'];
