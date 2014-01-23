@@ -123,7 +123,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      *
      * @param  string  $id  Cache id
      * @param  boolean $doNotTestCacheValidity If set to true, the cache validity won't be tested
-     * @return string|false cached datas
+     * @return string | FALSE cached datas
      */
     public function load($id, $doNotTestCacheValidity = false)
     {
@@ -135,6 +135,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
                 return false;
             }
         } catch (Exception $e) {
+            $this->_log(__METHOD__ . ': ' . $e->getMessage());
             return false;
         }
         
@@ -145,7 +146,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      * Test if a cache is available or not (for the given id)
      *
      * @param  string $id Cache id
-     * @return mixed|false (a cache is not available) or "last modified" timestamp (int) of the available cache record
+     * @return mixed | FALSE (a cache is not available) or "last modified" timestamp (int) of the available cache record
      */
     public function test($id)
     {
@@ -154,6 +155,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
                 return $tmp['created_at'];
             }
         } catch (Exception $e) {
+            $this->_log(__METHOD__ . ': ' . $e->getMessage());
             return false;
         }
         
@@ -178,6 +180,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             $lifetime = $this->getLifetime($specificLifetime);
             $result = $this->set($id, $data, $lifetime, $tags);
         } catch (Exception $e) {
+            $this->_log(__METHOD__ . ': ' . $e->getMessage());
             return false;
         }
             
@@ -195,6 +198,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
         try {
             $result = $this->_collection->remove(array('_id' => $id));
         } catch (Exception $e) {
+            $this->_log(__METHOD__ . ': ' . $e->getMessage());
             return false;
         }
         
