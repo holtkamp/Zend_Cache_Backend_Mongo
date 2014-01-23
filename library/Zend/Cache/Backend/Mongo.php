@@ -129,7 +129,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     {
         try {
             if ($tmp = $this->get($id, true)) {
-                if ($doNotTestCacheValidity || !$doNotTestCacheValidity && ($tmp['created_at'] + $tmp['l']) >= time()) {
+                if ($doNotTestCacheValidity || $tmp['l'] === null || $tmp['l'] === 0 || $tmp['created_at'] + $tmp['l'] >= time()) {
                     return $tmp['d'];
                 } 
                 return false;
