@@ -27,8 +27,26 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     const DEFAULT_DBNAME = 'Db_Cache';
     const DEFAULT_COLLECTION = 'C_Cache';
     
+    /**
+     * The client used to communicate with the MongoDatabase
+     * 
+     * @var \MongoClient
+     */
     protected $_conn;
+    
+    /**
+     * The MongoDatabase in which a MongoCollection will be used to save the
+     * cache entries
+     * 
+     * @var \MongoDB 
+     */
     protected $_db;
+    
+    /**
+     * The MongoCollection to which cache entries will be written
+     * 
+     * @var \MongoCollection
+     */
     protected $_collection;
 
     /**
@@ -65,11 +83,11 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
         // Merge the options passed in; overridding any default options
         $this->_options = array_merge($this->_options, $options);
         
-        $this->_conn       = new MongoClient($this->getServerConnectionUrl());
+        $this->_conn       = new \MongoClient($this->getServerConnectionUrl());
         $this->_db         = $this->_conn->selectDB($this->_options['dbname']);
         $this->_collection = $this->_db->selectCollection($this->_options['collection']);
         $this->_collection->ensureIndex(array('t' => 1), array('background' => true));
-        $this->_collection->ensureIndex(array('expire' => 1), array('background' => true));
+        $this->_collection->ensureIndex(array('expires_at' => 1), array('background' => true));
     }
     
     /**
@@ -113,7 +131,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     public function ___expire($id)
     {
         if ($tmp = $this->get($id)) {
-            $tmp['l'] = -10;
+            $tmp['expires_at'] = new \MongoDate(time() - 10);
             $this->_collection->save($tmp);
         }
     }    
@@ -129,7 +147,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     {
         try {
             if ($tmp = $this->get($id, true)) {
-                if ($doNotTestCacheValidity || $tmp['l'] === null || $tmp['l'] === 0 || $tmp['created_at'] + $tmp['l'] >= time()) {
+                if ($doNotTestCacheValidity === true || $tmp['expires_at'] === null || $tmp['expires_at']->sec >= time()) {
                     return $tmp['d'];
                 } 
                 return false;
@@ -231,7 +249,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
                 return $this->_collection->remove();
                 break;
             case Zend_Cache::CLEANING_MODE_OLD:
-                return $this->_collection->remove(array('expire' => array('$lt' => time())));
+                return $this->_collection->remove(array('expires_at' => array('$lt' => new \MongoDate())));
                 break;
             case Zend_Cache::CLEANING_MODE_MATCHING_TAG:
                 return $this->_collection->remove(array('t' => array('$all' => $tags)));
@@ -427,13 +445,12 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     public function getMetadatas($id)
     {
         if ($tmp = $this->get($id)) {
-            $data = $tmp['d'];
-            $mtime = $tmp['created_at'];
-            $lifetime = $tmp['l'];
+            $expiresAt = $tmp['expires_at'];
+            $createdAt = $tmp['created_at'];
             return array(
-                'expire' => $mtime + $lifetime,
+                'expire' => $expiresAt instanceof \MongoDate ? $expiresAt->sec : null,
                 'tags' => $tmp['t'],
-                'mtime' => $mtime
+                'mtime' => $createdAt->sec
             );
         }
         
@@ -443,27 +460,23 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     /**
      * Give (if possible) an extra lifetime to the given cache id
      *
+     * TODO: consider using findOneAndModify to reduce amount of requests to MongoDB
      * @param string $id cache id
      * @param integer $extraLifetime
      * @return boolean true if ok
      */    
    public function touch($id, $extraLifetime)
    {
+        $result = false;
         if ($tmp = $this->get($id)) {
-            $data = $tmp['d'];
-            $mtime = $tmp['created_at'];
-            $lifetime = $tmp['l'];
-            $tags = $tmp['t'];
-            $newLifetime = $lifetime - (time() - $mtime) + $extraLifetime;
-            if ($newLifetime <=0) {
-                return false;
-            } 
-            
-            $result = $this->set($id, $data, $newLifetime,$tags);
-            return $result;
+            //Check whether an expiration time has been set that has not expired yet
+            if($tmp['expires_at'] instanceof \MongoData && $tmp['expires_at']->sec > time()){
+                $newLifetime = $tmp['expires_at']->sec + $extraLifetime;
+                $result = $this->set($id, $tmp['d'], $newLifetime, $tmp['t']);
+            }
         }
         
-        return false;
+        return $result;
     }
     
     /**
@@ -493,6 +506,8 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     }
     
     /**
+     * Save data to a the MongoDB collection
+     * 
      * @param integer $id
      * @param array $data
      * @param integer $lifetime
@@ -501,15 +516,15 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      */
     private function set($id, $data, $lifetime, $tags)
     {
-        $now = time();
+        list($nowMicroseconds, $nowSeconds) = explode(' ', microtime());
+        $nowMicroseconds = intval($nowMicroseconds * 1000000); //Convert from 'expressed in seconds' to complete microseconds
         
         return $this->_collection->save(
             array(
             	'_id' => $id, 
                 'd' => $data,
-                'created_at' => $now,
-                'l' => $lifetime,
-                'expire' => $now + $lifetime,
+                'created_at' => new \MongoDate($nowSeconds, $nowMicroseconds),
+                'expires_at' => is_numeric($lifetime) && intval($lifetime) !== 0 ? new \MongoDate($nowSeconds + $lifetime, $nowMicroseconds) : null, 
                 't' => $tags,
                 'hits' => 0
             )
