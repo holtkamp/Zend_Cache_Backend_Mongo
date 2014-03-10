@@ -26,25 +26,25 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     const DEFAULT_PERSISTENT = true;
     const DEFAULT_DBNAME = 'Db_Cache';
     const DEFAULT_COLLECTION = 'C_Cache';
-    
+
     /**
      * The client used to communicate with the MongoDatabase
-     * 
+     *
      * @var \MongoClient
      */
     protected $_conn;
-    
+
     /**
      * The MongoDatabase in which a MongoCollection will be used to save the
      * cache entries
-     * 
-     * @var \MongoDB 
+     *
+     * @var \MongoDB
      */
     protected $_db;
-    
+
     /**
      * The MongoCollection to which cache entries will be written
-     * 
+     *
      * @var \MongoCollection
      */
     protected $_collection;
@@ -71,7 +71,12 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     );
 
     /**
-     * @return void
+     * Note that we use TTL Collections to have the Mongo deamon automatically clean
+     * expired entries
+     *
+     * @link http://docs.mongodb.org/manual/tutorial/expire-data/
+     * @param $options
+     * @return self
      */
     public function __construct($options)
     {
@@ -79,20 +84,25 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             Zend_Cache::throwException('The MongoDB extension must be loaded for using this backend !');
         }
         parent::__construct($options);
-        
-        // Merge the options passed in; overridding any default options
+
+        // Merge the options passed in; overriding any default options
         $this->_options = array_merge($this->_options, $options);
-        
+
         $this->_conn       = new \MongoClient($this->getServerConnectionUrl());
         $this->_db         = $this->_conn->selectDB($this->_options['dbname']);
         $this->_collection = $this->_db->selectCollection($this->_options['collection']);
         $this->_collection->ensureIndex(array('t' => 1), array('background' => true));
-        $this->_collection->ensureIndex(array('expires_at' => 1), array('background' => true));
+        $this->_collection->ensureIndex(
+            array('expires_at' => 1),
+            array('background' => true,
+                'expireAfterSeconds' => 0 //Have entries expire directly (0 seconds) after reaching expiration time
+            )
+        );
     }
-    
+
     /**
      * Assemble the URL that can be used to connect to the MongoDB server
-     * 
+     *
      * Note that:
      *  - connections to multiple servers at once is currently not supported
      *  - FALSE, NULL or empty string values should be used to discard options
@@ -100,7 +110,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      *    environment overrides a 'production' environment, it might be required
      *    to discard the username and/or password, when this is not required
      *    during development
-     * 
+     *
      * @link http://www.php.net/manual/en/mongoclient.construct.php
      * @return string
      */
@@ -113,16 +123,16 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             $parts[] = $this->_options['password'];
             $parts[] = '@';
         }
-        
+
         $parts[] = isset($this->_options['host']) && strlen($this->_options['host']) > 0 ? $this->_options['host'] : self::DEFAULT_HOST;
         $parts[] = ':';
         $parts[] = isset($this->_options['port']) && is_numeric($this->_options['port']) ? $this->_options['port'] : self::DEFAULT_PORT;
         $parts[] = '/';
         $parts[] = isset($this->_options['dbname']) && strlen($this->_options['dbname']) > 0 ? $this->_options['dbname'] : self::DEFAULT_DBNAME;
-        
+
         return implode('', $parts);
     }
-    
+
     /**
      * Expires a record (mostly used for testing purposes)
      * @param string $id
@@ -134,8 +144,8 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             $tmp['expires_at'] = new \MongoDate(time() - 10);
             $this->_collection->save($tmp);
         }
-    }    
-    
+    }
+
     /**
      * Test if a cache is available for the given id and (if yes) return it (false else)
      *
@@ -149,17 +159,17 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             if ($tmp = $this->get($id, true)) {
                 if ($doNotTestCacheValidity === true || $tmp['expires_at'] === null || $tmp['expires_at']->sec >= time()) {
                     return $tmp['d'];
-                } 
+                }
                 return false;
             }
         } catch (Exception $e) {
             $this->_log(__METHOD__ . ': ' . $e->getMessage());
             return false;
         }
-        
+
         return false;
     }
-    
+
     /**
      * Test if a cache is available or not (for the given id)
      *
@@ -176,7 +186,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             $this->_log(__METHOD__ . ': ' . $e->getMessage());
             return false;
         }
-        
+
         return false;
     }
 
@@ -199,18 +209,18 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             $result = $this->set($id, $data, $lifetime, $tags);
         } catch (Exception $e) {
             $this->_log(__METHOD__ . ': ' . $e->getMessage());
-            return false;
+            $result = false;
         }
-            
+
         return $result;
-    }    
-    
+    }
+
     /**
      * Remove a cache record
      *
      * @param  string $id Cache id
      * @return boolean True if no problem
-     */    
+     */
     public function remove($id)
     {
         try {
@@ -219,10 +229,10 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             $this->_log(__METHOD__ . ': ' . $e->getMessage());
             return false;
         }
-        
+
         return $result;
-    }    
-    
+    }
+
     /**
      * Clean some cache records (protected method used for recursive stuff)
      *
@@ -236,7 +246,6 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      * Zend_Cache::CLEANING_MODE_MATCHING_ANY_TAG => remove cache entries matching any given tags
      *                                               ($tags can be an array of strings or a single string)
      *
-     * @param  string $dir  Directory to clean
      * @param  string $mode Clean mode
      * @param  array  $tags Array of tags
      * @throws Zend_Cache_Exception
@@ -246,17 +255,17 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     {
         switch ($mode) {
             case Zend_Cache::CLEANING_MODE_ALL:
-                return $this->_collection->remove();
+                return $this->_collection->remove(array());
                 break;
             case Zend_Cache::CLEANING_MODE_OLD:
                 return $this->_collection->remove(array('expires_at' => array('$lt' => new \MongoDate())));
                 break;
             case Zend_Cache::CLEANING_MODE_MATCHING_TAG:
                 return $this->_collection->remove(array('t' => array('$all' => $tags)));
-                break;                
+                break;
             case Zend_Cache::CLEANING_MODE_NOT_MATCHING_TAG:
                 return $this->_collection->remove(array('t' => array('$nin' => $tags)));
-                break;                
+                break;
             case Zend_Cache::CLEANING_MODE_MATCHING_ANY_TAG:
                 return $this->_collection->remove(array('t' => array('$in' => $tags)));
                 break;
@@ -265,7 +274,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
                 break;
         }
     }
-        
+
     /**
      * Return true if the automatic cleaning is available for the backend
      *
@@ -274,15 +283,15 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     public function isAutomaticCleaningAvailable()
     {
         return false;
-    }    
-    
+    }
+
     /**
      * Set the frontend directives
      *
      * @param  array $directives Assoc of directives
      * @throws Zend_Cache_Exception
      * @return void
-     */    
+     */
     public function setDirectives($directives)
     {
         parent::setDirectives($directives);
@@ -305,19 +314,19 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
         while ($tmp = $cursor->getNext()) {
             $ret[] = $tmp['_id'];
         }
-        
+
         return $ret;
     }
-    
+
     /**
      * Return an array of stored tags
      *
      * @return array array of stored tags (string)
-     */    
+     */
     public function getTags()
     {
         $cmd['mapreduce'] = $this->_options['collection'];
-        
+
         $cmd['map']       = 'function(){
                                 this.t.forEach(
                                     function(z){
@@ -325,30 +334,30 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
                                     }
                                 );
                             };';
-        
+
         $cmd['reduce']    = 'function( key , values ){
                                 var total = 0;
                                 for ( var i=0; i<values.length; i++ )
                                     total += values[i].count;
                                 return { count : total };
                             };';
-        
+
         $cmd['out'] = array('replace' => 'getTagsCollection');
-        
+
         $res2 = $this->_db->command($cmd);
 
         $res3 = $this->_db->selectCollection('getTagsCollection')->find();
-        
+
         $res = array();
         foreach ($res3 as $key => $val) {
             $res[] = $key;
         }
-        
+
         $this->_db->dropCollection($res2['result']);
-        
+
         return $res;
     }
-    
+
     public function drop()
     {
         return $this->_collection->drop();
@@ -361,21 +370,21 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      *
      * @param array $tags array of tags
      * @return array array of matching cache ids (string)
-     */    
+     */
     public function getIdsMatchingTags($tags = array())
     {
         $cursor =  $this->_collection->find(
             array('t' => array('$all' => $tags))
         );
         $ret = array();
-        
+
         while ($tmp = $cursor->getNext()) {
             $ret[] = $tmp['_id'];
         }
-        
+
         return $ret;
     }
-    
+
     /**
      * Return an array of stored cache ids which don't match given tags
      *
@@ -383,21 +392,21 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      *
      * @param array $tags array of tags
      * @return array array of not matching cache ids (string)
-     */    
+     */
     public function getIdsNotMatchingTags($tags = array())
     {
         $cursor =  $this->_collection->find(
             array('t' => array('$nin' => $tags))
         );
         $ret = array();
-        
+
         while ($tmp = $cursor->getNext()) {
             $ret[] = $tmp['_id'];
         }
-        
-        return $ret;        
+
+        return $ret;
     }
-    
+
     /**
      * Return an array of stored cache ids which match any given tags
      *
@@ -405,32 +414,32 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      *
      * @param array $tags array of tags
      * @return array array of any matching cache ids (string)
-     */    
+     */
     public function getIdsMatchingAnyTags($tags = array())
     {
         $cursor =  $this->_collection->find(
             array('t' => array('$in' => $tags))
         );
-        
+
         $ret = array();
         while ($tmp = $cursor->getNext()) {
             $ret[] = $tmp['_id'];
         }
-        
-        return $ret;        
+
+        return $ret;
     }
-    
+
     /**
      * No way to find the remaining space right now. So return 1.
      *
      * @throws Zend_Cache_Exception
      * @return int integer between 0 and 100
-     */    
+     */
     public function getFillingPercentage()
     {
         return 1;
     }
-    
+
     /**
      * Return an array of metadatas for the given cache id
      *
@@ -441,7 +450,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      *
      * @param string $id cache id
      * @return array array of metadatas (false if the cache id is not found)
-     */    
+     */
     public function getMetadatas($id)
     {
         if ($tmp = $this->get($id)) {
@@ -453,10 +462,10 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
                 'mtime' => $createdAt->sec
             );
         }
-        
+
         return false;
     }
-    
+
     /**
      * Give (if possible) an extra lifetime to the given cache id
      *
@@ -464,9 +473,9 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      * @param string $id cache id
      * @param integer $extraLifetime
      * @return boolean true if ok
-     */    
-   public function touch($id, $extraLifetime)
-   {
+     */
+    public function touch($id, $extraLifetime)
+    {
         $result = false;
         if ($tmp = $this->get($id)) {
             //Check whether an expiration time has been set that has not expired yet
@@ -475,10 +484,10 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
                 $result = $this->set($id, $tmp['d'], $newLifetime, $tmp['t']);
             }
         }
-        
+
         return $result;
     }
-    
+
     /**
      * Return an associative array of capabilities (booleans) of the backend
      *
@@ -504,10 +513,10 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             'get_list' => true
         );
     }
-    
+
     /**
      * Save data to a the MongoDB collection
-     * 
+     *
      * @param integer $id
      * @param array $data
      * @param integer $lifetime
@@ -518,24 +527,24 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     {
         list($nowMicroseconds, $nowSeconds) = explode(' ', microtime());
         $nowMicroseconds = intval($nowMicroseconds * 1000000); //Convert from 'expressed in seconds' to complete microseconds
-        
+
         return $this->_collection->save(
             array(
-            	'_id' => $id, 
+                '_id' => $id,
                 'd' => $data,
                 'created_at' => new \MongoDate($nowSeconds, $nowMicroseconds),
-                'expires_at' => is_numeric($lifetime) && intval($lifetime) !== 0 ? new \MongoDate($nowSeconds + $lifetime, $nowMicroseconds) : null, 
+                'expires_at' => is_numeric($lifetime) && intval($lifetime) !== 0 ? new \MongoDate($nowSeconds + $lifetime, $nowMicroseconds) : null,
                 't' => $tags,
                 'hits' => 0
             )
         );
-    }   
-    
+    }
+
     /**
      * Lookup a specific cache entry
-     * 
+     *
      * Optionally, increment the hit counter when loading the cache entry
-     * 
+     *
      * @param integer $id
      * @param boolean $incrementHitCounter = false
      * @return array | FALSE
@@ -544,13 +553,13 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     {
         if($incrementHitCounter === true){
             return $this->_collection->findAndModify(
-                    array('_id' => $id)
-                    , array('$inc' => array('hits' => 1))
+                array('_id' => $id)
+                , array('$inc' => array('hits' => 1))
             );
         }
         else{
             return $this->_collection->findOne(array('_id' => $id));
         }
     }
-    
+
 }
