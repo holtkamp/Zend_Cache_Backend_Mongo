@@ -23,24 +23,8 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
 
     const DEFAULT_HOST = '127.0.0.1';
     const DEFAULT_PORT =  27017;
-    const DEFAULT_PERSISTENT = true;
     const DEFAULT_DBNAME = 'Db_Cache';
     const DEFAULT_COLLECTION = 'C_Cache';
-
-    /**
-     * The client used to communicate with the MongoDatabase
-     *
-     * @var \MongoClient
-     */
-    protected $_conn;
-
-    /**
-     * The MongoDatabase in which a MongoCollection will be used to save the
-     * cache entries
-     *
-     * @var \MongoDB
-     */
-    protected $_db;
 
     /**
      * The MongoCollection to which cache entries will be written
@@ -50,24 +34,35 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     protected $_collection;
 
     /**
-     * Available options
+     * If true, indexes have already been ensured for the above collection.
      *
-     * =====> (array) servers :
-     * an array of mongodb server ; each mongodb server is described by an associative array :
-     * 'host' => (string) : the name of the mongodb server
-     * 'port' => (int) : the port of the mongodb server
-     * 'persistent' => (bool) : use or not persistent connections to this mongodb server
-     * 'collection' => (string) : name of the collection to use
-     * 'dbname' => (string) : name of the database to use
+     * @var bool
+     */
+    private $_indexesEnsured = false;
+
+    /**
+     * Available options:
+     * 'incrementHitCounter' => (bool): if true, hit counter is incremented
+     *                          on each read (increases load on the master).
+     *
+     * Also:
+     * 1. If 'collection' property is present and holds an instance
+     *    of MongoConnection, it is used to hold the cached data.
+     * 2. Otherwise, the following options are available:
+     *    'host' => (string): the name of the MongoDB server
+     *    'port' => (int): the port of the MongoDB server
+     *    'user' => (string): username to connect as
+     *    'password' => (string): password to connect with
+     *    'dbname' => (string): name of the database to use
+     *    'collection' => (string): name of the collection to use
      *
      * @var array available options
      */
     protected $_options = array(
         'host'       => self::DEFAULT_HOST,
         'port'       => self::DEFAULT_PORT,
-        'persistent' => self::DEFAULT_PERSISTENT,
-        'collection' => self::DEFAULT_COLLECTION,
         'dbname'     => self::DEFAULT_DBNAME,
+        'collection' => self::DEFAULT_COLLECTION,
     );
 
     /**
@@ -88,23 +83,24 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
         // Merge the options passed in; overriding any default options
         $this->_options = array_merge($this->_options, $options);
 
-        $this->_conn       = new \MongoClient($this->getServerConnectionUrl());
-        $this->_db         = $this->_conn->selectDB($this->_options['dbname']);
-        $this->_collection = $this->_db->selectCollection($this->_options['collection']);
-        $this->_collection->ensureIndex(array('t' => 1), array('background' => true));
-        $this->_collection->ensureIndex(
-            array('expires_at' => 1),
-            array('background' => true,
-                'expireAfterSeconds' => 0 //Have entries expire directly (0 seconds) after reaching expiration time
-            )
-        );
+        // We check by is_object(), not by "instanceof \MongoCollection", because
+        // there could be a wrapper passed, which defines __get() and __call()
+        // methods to intercept and pass calls to a real wrapped MongoConnection
+        // (e.g. for lazy connections, for reconnect support etc.)
+        if (isset($this->_options['collection']) && is_object($this->_options['collection'])) {
+            $this->_collection = $this->_options['collection'];
+            $this->_options['collection'] = $this->_collection->getName();
+        } else {
+            $conn = new \MongoClient($this->getServerConnectionUrl());
+            $db = $conn->selectDB($this->_options['dbname']);
+            $this->_collection = $db->selectCollection($this->_options['collection']);
+        }
     }
 
     /**
      * Assemble the URL that can be used to connect to the MongoDB server
      *
      * Note that:
-     *  - connections to multiple servers at once is currently not supported
      *  - FALSE, NULL or empty string values should be used to discard options
      *    in an environment-specific configuration. For example when a 'development'
      *    environment overrides a 'production' environment, it might be required
@@ -156,7 +152,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     public function load($id, $doNotTestCacheValidity = false)
     {
         try {
-            if ($tmp = $this->get($id, true)) {
+            if ($tmp = $this->get($id, !empty($this->_options['incrementHitCounter']))) {
                 if ($doNotTestCacheValidity === true || $tmp['expires_at'] === null || $tmp['expires_at']->sec >= time()) {
                     return $tmp['d'];
                 }
@@ -174,7 +170,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      * Test if a cache is available or not (for the given id)
      *
      * @param  string $id Cache id
-     * @return mixed | FALSE (a cache is not available) or "last modified" timestamp (int) of the available cache record
+     * @return mixed | bool (a cache is not available) or "last modified" timestamp (int) of the available cache record
      */
     public function test($id)
     {
@@ -199,7 +195,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      * @param  string $data             Datas to cache
      * @param  string $id               Cache id
      * @param  array  $tags             Array of strings, the cache record will be tagged by each string entry
-     * @param  int    $specificLifetime If != false, set a specific lifetime for this cache record (null => infinite lifetime)
+     * @param  int|bool    $specificLifetime If != false, set a specific lifetime for this cache record (null => infinite lifetime)
      * @return boolean True if no problem
      */
     public function save($data, $id, $tags = array(), $specificLifetime = false)
@@ -212,7 +208,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
             $result = false;
         }
 
-        return $result;
+        return (bool)$result;
     }
 
     /**
@@ -224,6 +220,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     public function remove($id)
     {
         try {
+            $this->ensureIndexes();
             $result = $this->_collection->remove(array('_id' => $id));
         } catch (Exception $e) {
             $this->_log(__METHOD__ . ': ' . $e->getMessage());
@@ -253,6 +250,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      */
     public function clean($mode = Zend_Cache::CLEANING_MODE_ALL, $tags = array())
     {
+        $this->ensureIndexes();
         switch ($mode) {
             case Zend_Cache::CLEANING_MODE_ALL:
                 return $this->_collection->remove(array());
@@ -325,6 +323,8 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      */
     public function getTags()
     {
+        $db = $this->_collection->db;
+
         $cmd['mapreduce'] = $this->_options['collection'];
 
         $cmd['map']       = 'function(){
@@ -344,16 +344,16 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
 
         $cmd['out'] = array('replace' => 'getTagsCollection');
 
-        $res2 = $this->_db->command($cmd);
+        $res2 = $db->command($cmd);
 
-        $res3 = $this->_db->selectCollection('getTagsCollection')->find();
+        $res3 = $db->selectCollection('getTagsCollection')->find();
 
         $res = array();
         foreach ($res3 as $key => $val) {
             $res[] = $key;
         }
 
-        $this->_db->dropCollection($res2['result']);
+        $db->dropCollection($res2['result']);
 
         return $res;
     }
@@ -527,7 +527,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
     {
         list($nowMicroseconds, $nowSeconds) = explode(' ', microtime());
         $nowMicroseconds = intval($nowMicroseconds * 1000000); //Convert from 'expressed in seconds' to complete microseconds
-
+        $this->ensureIndexes();
         return $this->_collection->save(
             array(
                 '_id' => $id,
@@ -544,6 +544,7 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
      * Lookup a specific cache entry
      *
      * Optionally, increment the hit counter when loading the cache entry
+     * (this increases load on the master, so by default it is turned off).
      *
      * @param integer $id
      * @param boolean $incrementHitCounter = false
@@ -562,4 +563,24 @@ class Zend_Cache_Backend_Mongo extends Zend_Cache_Backend implements Zend_Cache_
         }
     }
 
+    /**
+     * Calls ensureIndex() on the collection if they were not called yet.
+     * Typically executed before cache writes only to avoid disturbing
+     * the master database on much more frequent cache reads.
+     *
+     * @return void
+     */
+    private function ensureIndexes()
+    {
+        if (!$this->_indexesEnsured) {
+            $this->_indexesEnsured = true;
+            $this->_collection->ensureIndex(array('t' => 1), array('background' => true));
+            $this->_collection->ensureIndex(
+                array('expires_at' => 1),
+                array('background' => true,
+                    'expireAfterSeconds' => 0 // Have entries expire directly (0 seconds) after reaching expiration time
+                )
+            );
+        }
+    }
 }
