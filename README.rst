@@ -25,11 +25,11 @@ Constructor options for this backend:
 
 Associative array with following fields:
 
-'host' => (string) : the name of the mongodb server
-'port' => (int) : the port of the mongodb server
-'persistent' => (bool) : use or not persistent connections to this mongodb server
-'collection' => (string) : name of the collection to use
-'dbname' => (string) : name of the database to use
+- 'host' => (string) : the name of the mongodb server
+- 'port' => (integer) : the port of the mongodb server
+- 'persistent' => (bool) : use or not persistent connections to this mongodb server
+- 'collection' => (string) : name of the collection to use
+- 'dbname' => (string) : name of the database to use
 
 Credits
 =======
