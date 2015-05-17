@@ -1,6 +1,6 @@
 Zend_Cache_Backend_Mongo
 ============
-:Author: Anton Stöckl <anton@stoeckl.de>
+Author: [Anton Stöckl](mailto:anton@stoeckl.de)
 
 About
 =====
@@ -34,7 +34,7 @@ Associative array with following fields:
 Credits
 =======
 
-:Original Author: Olivier Bregeras <olivier.bregeras@gmail.com>
+Original author: [Olivier Bregeras](mailto:olivier.bregeras@gmail.com)
 
 Changes against original version from Stunti
 ============================================
