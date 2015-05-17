@@ -4,7 +4,7 @@ Zend_Cache_Backend_Mongo
 
 About
 =====
-**Zend_Cache_Backend_Mongo** is a `Zend Framework <http://zendframework.com/> Backend for `MongoDB <http://www.mongodb.org/>.
+**Zend_Cache_Backend_Mongo** is a [Zend Framework](http://framework.zend.com) Cache Backend for [MongoDB](http://www.mongodb.org).
 It supports tags and autocleaning.
 
 Dependencies
